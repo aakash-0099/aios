@@ -48,7 +48,12 @@ class Kernel:
     handler that raises, a syscall that times out -- is reported as
     a `FAILED` `AgentResponse` rather than an exception, the same
     way a real syscall reports an error code instead of crashing
-    its caller.
+    its caller. Note that "unsupported syscall" is now discovered
+    inside the dispatcher's worker, after the syscall has already
+    been queued, rather than synchronously inside `submit()` -- the
+    caller sees no difference (still a deterministic `FAILED`
+    response), but it is no longer raised from this method's own
+    stack frame.
     """
 
     def __init__(
@@ -136,3 +141,16 @@ class Kernel:
         """
 
         return self._runtime.registry
+
+    def close(self) -> None:
+        """
+        Shut down the underlying runtime's dispatcher worker threads
+        and release its queue backend (e.g. a Redis connection).
+
+        Optional: worker threads are daemons, so an unclosed kernel
+        will not prevent the process from exiting. Call this when a
+        kernel's lifetime is scoped (tests, short-lived scripts) to
+        avoid accumulating idle worker threads.
+        """
+
+        self._runtime.close()

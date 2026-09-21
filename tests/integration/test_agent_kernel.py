@@ -60,14 +60,17 @@ def test_agent_can_exercise_every_syscall_in_one_session():
         assert response.request_id == request.request_id
         assert response.status == RequestStatus.SUCCESS
 
+    kernel.close()
+
 
 def test_concurrent_requests_do_not_interfere():
     """
     Several requests dispatched at once must each resolve to their
-    own response, with no cross-talk between syscalls. This is the
-    property Phase 2's thread-per-syscall design exists to provide,
-    and the property Phase 3's isolation tests will later push much
-    harder on across real agents.
+    own response, with no cross-talk between syscalls -- true
+    whether a syscall runs on its own thread or, as now, on one of
+    the dispatcher's bounded worker-pool threads. Phase 3's
+    isolation tests will later push much harder on this same
+    property across real agents.
     """
 
     kernel = Kernel()
@@ -95,6 +98,8 @@ def test_concurrent_requests_do_not_interfere():
         assert response.result["resource_id"] == (
             request.syscall.payload["resource_id"]
         )
+
+    kernel.close()
 
 
 def test_phase_3_can_replace_a_mock_without_touching_the_kernel():
@@ -129,3 +134,5 @@ def test_phase_3_can_replace_a_mock_without_touching_the_kernel():
     assert response.status == RequestStatus.SUCCESS
     assert response.result["handler"] == "real_memory_manager"
     assert response.result["content"] == "hydrated from a real store"
+
+    kernel.close()
