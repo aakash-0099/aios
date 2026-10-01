@@ -66,3 +66,9 @@ class ExecutionError(AIOSException):
     """
     Raised when an AIOS operation fails during execution.
     """
+
+
+class InvalidStateTransitionError(AIOSException):
+    """
+    Raised when an entity attempts an invalid state transition.
+    """
