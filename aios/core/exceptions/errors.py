@@ -62,6 +62,24 @@ class TaskError(AIOSException):
     """
 
 
+class DuplicateTaskError(TaskError):
+    """
+    Raised when attempting to add or queue a duplicate task.
+    """
+
+
+class QueueEmptyError(AIOSException):
+    """
+    Raised when attempting to dequeue or peek from an empty queue.
+    """
+
+
+class SchedulerError(AIOSException):
+    """
+    Raised when an error occurs during scheduling.
+    """
+
+
 class ExecutionError(AIOSException):
     """
     Raised when an AIOS operation fails during execution.
