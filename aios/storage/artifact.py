@@ -3,6 +3,13 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+ArtifactID = str
+"""Opaque handle returned by ``StorageManager.store``.
+
+Callers treat this as a token and hand it back to ``retrieve``/``delete``;
+they must not parse it or rely on its internal format.
+"""
+
 
 class StorageError(Exception):
     """Base exception for all storage-related errors."""
@@ -18,6 +25,10 @@ class PathTraversalError(StorageError):
 
 class InvalidNamespaceError(StorageError):
     """Raised when a namespace name does not meet naming rules."""
+
+
+class InvalidArtifactName(StorageError):
+    """Raised when an artifact name uses a reserved path component."""
 
 
 class ArtifactExistsError(StorageError):

@@ -9,6 +9,7 @@ import aios.storage
 from aios.storage.artifact import (
     ArtifactExistsError,
     ArtifactNotFound,
+    InvalidArtifactName,
     InvalidNamespaceError,
     PathTraversalError,
 )
@@ -74,7 +75,7 @@ def test_traversal_attempts_rejected_in_manager(
         manager.exists("ns", traversal_name)
 
     with pytest.raises(PathTraversalError):
-        manager.delete("ns", traversal_name)
+        manager.delete_at("ns", traversal_name)
 
 
 def test_symlink_escape_rejected_in_manager(tmp_path: Path) -> None:
@@ -97,6 +98,71 @@ def test_symlink_escape_rejected_in_manager(tmp_path: Path) -> None:
 
     with pytest.raises(PathTraversalError):
         manager.read("ns", "leak_link")
+
+
+def test_public_contract_store_retrieve_delete(tmp_path: Path) -> None:
+    """The documented contract: root_path kwarg, store/retrieve/delete over ArtifactID."""
+    storage = StorageManager(root_path=tmp_path)
+    metadata = {"origin": "memory-manager"}
+
+    artifact_id = storage.store("eviction", "chunk-1", b"evicted payload", metadata=metadata)
+    assert isinstance(artifact_id, str) and artifact_id
+
+    artifact = storage.retrieve(artifact_id)
+    assert artifact.namespace == "eviction"
+    assert artifact.name == "chunk-1"
+    assert artifact.metadata == metadata
+    assert storage.read_artifact(artifact_id) == b"evicted payload"
+
+    storage.delete(artifact_id)
+    with pytest.raises(ArtifactNotFound):
+        storage.retrieve(artifact_id)
+    with pytest.raises(ArtifactNotFound):
+        storage.delete(artifact_id)
+
+
+def test_retrieve_rejects_malformed_id(tmp_path: Path) -> None:
+    """A malformed ArtifactID raises rather than silently returning None."""
+    storage = StorageManager(root_path=tmp_path)
+    for bad_id in ("no-separator", "", None):
+        with pytest.raises(ArtifactNotFound):
+            storage.retrieve(bad_id)  # type: ignore[arg-type]
+
+
+def test_store_duplicate_key_raises(tmp_path: Path) -> None:
+    """store() refuses to silently clobber an existing key in a namespace."""
+    storage = StorageManager(root_path=tmp_path)
+    storage.store("ns", "k", b"first")
+    with pytest.raises(ArtifactExistsError):
+        storage.store("ns", "k", b"second")
+    assert storage.read_artifact("ns:k") == b"first"
+
+
+def test_reserved_meta_component_rejected(tmp_path: Path) -> None:
+    """Callers cannot write into the internal .meta directory."""
+    storage = StorageManager(root_path=tmp_path)
+    storage.create("ns", "a.txt", b"v1", metadata={"k": "orig"})
+
+    for reserved in (".meta/a.txt.json", ".meta/injected.txt", ".meta/x.json"):
+        with pytest.raises(InvalidArtifactName):
+            storage.create("ns", reserved, b"[]", overwrite=True)
+        with pytest.raises(InvalidArtifactName):
+            storage.read("ns", reserved)
+
+    # Metadata survives the rejected writes.
+    assert storage.get_artifact("ns", "a.txt").metadata == {"k": "orig"}
+
+
+def test_failed_metadata_serialisation_leaves_no_artifact(tmp_path: Path) -> None:
+    """A create() that fails mid-way does not leave orphaned content behind."""
+    storage = StorageManager(root_path=tmp_path)
+
+    with pytest.raises(TypeError):
+        storage.create("ns", "obj.txt", b"payload", metadata={"bad": object()})
+
+    assert not storage.exists("ns", "obj.txt")
+    with pytest.raises(ArtifactNotFound):
+        storage.read("ns", "obj.txt")
 
 
 def test_reading_missing_artifact_raises_artifact_not_found(tmp_path: Path) -> None:
@@ -174,7 +240,7 @@ def test_invalid_namespace_names_raise_error(tmp_path: Path) -> None:
         manager.list("-bad-lead")
 
     with pytest.raises(InvalidNamespaceError):
-        manager.delete(".hidden", "file.txt")
+        manager.delete_at(".hidden", "file.txt")
 
 
 def test_delete_missing_artifact_raises_not_found(tmp_path: Path) -> None:
@@ -182,7 +248,7 @@ def test_delete_missing_artifact_raises_not_found(tmp_path: Path) -> None:
     manager = StorageManager(tmp_path)
 
     with pytest.raises(ArtifactNotFound):
-        manager.delete("default", "non_existent.txt")
+        manager.delete_at("default", "non_existent.txt")
 
 
 def test_create_existing_artifact_overwrite_flag(tmp_path: Path) -> None:
@@ -207,7 +273,7 @@ def test_exists_and_delete(tmp_path: Path) -> None:
     manager.create("ns", "file.txt", b"content", metadata={"v": 1})
     assert manager.exists("ns", "file.txt")
 
-    manager.delete("ns", "file.txt")
+    manager.delete_at("ns", "file.txt")
     assert not manager.exists("ns", "file.txt")
     with pytest.raises(ArtifactNotFound):
         manager.read("ns", "file.txt")

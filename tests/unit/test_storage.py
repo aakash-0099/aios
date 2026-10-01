@@ -43,5 +43,5 @@ def test_storage_end_to_end(tmp_path: Path) -> None:
     assert items[0].name == "item.bin"
 
     # Delete
-    manager.delete("main-ns", "item.bin")
+    manager.delete_at("main-ns", "item.bin")
     assert not manager.exists("main-ns", "item.bin")

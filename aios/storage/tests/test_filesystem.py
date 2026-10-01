@@ -6,8 +6,8 @@ import sys
 from unittest.mock import patch
 import pytest
 
-from aios.storage.artifact import PathTraversalError
-from aios.storage.filesystem import atomic_write, safe_resolve
+from aios.storage.artifact import InvalidArtifactName, PathTraversalError
+from aios.storage.filesystem import atomic_write, internal_resolve, safe_resolve
 
 
 @pytest.mark.parametrize(
@@ -52,6 +52,33 @@ def test_safe_resolve_symlink_escape(tmp_path: Path) -> None:
 
     with pytest.raises(PathTraversalError):
         safe_resolve(root, "symlink_escape")
+
+
+@pytest.mark.parametrize(
+    "reserved_name",
+    [".meta", ".meta/a.txt", "a/.meta/b.txt", ".meta/../.meta/x"],
+)
+def test_safe_resolve_rejects_reserved_components(
+    tmp_path: Path, reserved_name: str
+) -> None:
+    """Reserved internal path components are rejected for user-supplied names."""
+    root = tmp_path / "ns_root"
+    root.mkdir()
+
+    with pytest.raises(InvalidArtifactName):
+        safe_resolve(root, reserved_name)
+
+
+def test_internal_resolve_allows_reserved_components(tmp_path: Path) -> None:
+    """internal_resolve permits .meta but still blocks traversal."""
+    root = tmp_path / "ns_root"
+    root.mkdir()
+
+    resolved = internal_resolve(root, ".meta/a.txt.json")
+    assert resolved == (root / ".meta" / "a.txt.json").resolve()
+
+    with pytest.raises(PathTraversalError):
+        internal_resolve(root, ".meta/../../escape")
 
 
 def test_safe_resolve_valid_paths(tmp_path: Path) -> None:

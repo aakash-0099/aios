@@ -1,10 +1,34 @@
 """Low-level filesystem operations with path traversal safety and atomic writes."""
 
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import tempfile
 
-from .artifact import PathTraversalError
+from .artifact import InvalidArtifactName, PathTraversalError
+
+RESERVED_COMPONENTS = frozenset({".meta"})
+"""Path components reserved for internal bookkeeping.
+
+Artifact names containing any of these are rejected so callers cannot write
+into the metadata sidecar directory and corrupt or hide artifacts.
+"""
+
+
+def _reject_reserved(name: str) -> None:
+    """Raise if any component of a user-supplied path is reserved.
+
+    Args:
+        name: The user-supplied relative path.
+
+    Raises:
+        InvalidArtifactName: If a path component is reserved.
+    """
+    parts = PurePosixPath(name.replace("\\", "/")).parts
+    for part in parts:
+        if part in RESERVED_COMPONENTS:
+            raise InvalidArtifactName(
+                f"Path component '{part}' in '{name}' is reserved for internal use"
+            )
 
 
 def safe_resolve(root: Path, name: str) -> Path:
@@ -17,6 +41,47 @@ def safe_resolve(root: Path, name: str) -> Path:
     Args:
         root: The namespace root directory.
         name: The relative file path to resolve.
+
+    Returns:
+        The safely resolved Path.
+
+    Raises:
+        PathTraversalError: If the path is absolute, points to root, or escapes root.
+        InvalidArtifactName: If a path component is reserved for internal use.
+    """
+    if not isinstance(name, str):
+        raise PathTraversalError(f"Expected string path, got {type(name).__name__}")
+
+    _reject_reserved(name)
+    return _resolve_checked(root, name)
+
+
+def internal_resolve(root: Path, name: str) -> Path:
+    """Resolve a path for internal bookkeeping use only.
+
+    Identical to safe_resolve but permits reserved components, so the manager
+    can address its own metadata directory. Never call this with a
+    user-supplied path.
+
+    Args:
+        root: The namespace root directory.
+        name: The relative path to resolve.
+
+    Returns:
+        The safely resolved Path.
+
+    Raises:
+        PathTraversalError: If the path is absolute, points to root, or escapes root.
+    """
+    return _resolve_checked(root, name)
+
+
+def _resolve_checked(root: Path, name: str) -> Path:
+    """Apply traversal checks to a relative path and resolve it under root.
+
+    Args:
+        root: The namespace root directory.
+        name: The relative path to resolve.
 
     Returns:
         The safely resolved Path.
