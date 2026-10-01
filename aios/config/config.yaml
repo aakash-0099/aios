@@ -1,0 +1,16 @@
+environment: development
+debug: true
+log_level: INFO
+
+queue:
+  backend: memory
+
+llm:
+  provider: openai
+
+storage:
+  root: ./data/storage
+
+timeouts:
+  request: 30
+  connect: 10
