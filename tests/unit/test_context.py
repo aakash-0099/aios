@@ -10,13 +10,19 @@ from __future__ import annotations
 
 import pytest
 
-from aios.context import ContextView, as_context_memory
+from aios.context import (
+    ContextCompressor,
+    ContextManager,
+    ContextView,
+    as_context_memory,
+)
 from aios.context.builder import ContextBuilder
 from aios.core import (
     AgentID,
     Context,
     Memory,
     MemoryID,
+    NotFoundError,
     ValidationError,
 )
 
@@ -188,3 +194,133 @@ def test_builder_rejects_invalid_inputs():
 
     with pytest.raises(ValidationError):
         builder.set_working_state(["not-a-dict"])  # type: ignore[arg-type]
+
+
+def _fake_context(message_count: int = 6) -> Context:
+    return Context(
+        system="Keep these instructions.",
+        conversation=[
+            {
+                "role": "user" if index % 2 == 0 else "assistant",
+                "content": f"message {index} " * 12,
+            }
+            for index in range(message_count)
+        ],
+        working_state={"step": 3},
+        metadata={"fixture": True},
+    )
+
+
+def test_compressor_is_deterministic_and_keeps_newest_messages():
+    compressor = ContextCompressor()
+    context = _fake_context()
+    limit = compressor.estimate_size(context) - 80
+
+    first = compressor.compress(context, limit)
+    second = compressor.compress(context, limit)
+
+    assert first == second
+    assert compressor.estimate_size(first) <= limit
+    assert first.system == context.system
+    assert first.working_state == context.working_state
+    assert first.conversation[0]["content"].startswith("Summary of earlier messages:")
+    assert first.conversation[-1] == context.conversation[-1]
+    assert context.conversation[0]["content"].startswith("message 0")
+
+
+def test_remove_strategy_drops_old_messages_without_a_summary():
+    compressor = ContextCompressor()
+    context = _fake_context()
+    result = compressor.compress(
+        context,
+        compressor.estimate_size(context) - 80,
+        strategy="remove",
+    )
+
+    assert result.conversation
+    assert result.conversation[-1] == context.conversation[-1]
+    assert all(
+        not str(message.get("content", "")).startswith("Summary of earlier")
+        for message in result.conversation
+    )
+
+
+def test_manager_stores_snapshots_and_switches_named_contexts():
+    manager = ContextManager()
+    first = _fake_context(2)
+    second = _fake_context(1)
+
+    manager.store("first", first)
+    manager.store("second", second)
+    first.conversation.clear()
+
+    assert manager.list_names() == ["first", "second"]
+    assert len(manager.get("first").conversation) == 2
+    assert manager.switch("second") == second
+    assert manager.active_name == "second"
+    assert manager.current() == second
+    assert manager.active_context == second
+
+    returned = manager.current()
+    returned.conversation.clear()
+    assert len(manager.current().conversation) == 1
+
+    restored = manager.switch_to("first")
+    assert len(restored.conversation) == 2
+    assert manager.current() == restored
+
+
+def test_manager_compresses_stored_context_and_validates_names():
+    manager = ContextManager()
+    manager.store("work", _fake_context())
+    limit = manager.estimate_size("work") - 80
+
+    result = manager.compress("work", limit)
+
+    assert manager.get("work") == result
+    assert manager.estimate_size("work") <= limit
+
+    with pytest.raises(ValidationError):
+        manager.store("work", Context())
+
+    with pytest.raises(NotFoundError):
+        manager.switch("missing")
+
+
+def test_size_estimation_supports_memory_dataclass_instances():
+    context = Context(
+        conversation=[{"role": "user", "content": "Use saved information."}],
+        memory=[_memory("A deterministic fake memory entry.")],
+    )
+    compressor = ContextCompressor()
+
+    first = compressor.estimate_size(context)
+    second = compressor.estimate_size(context)
+
+    assert first > 0
+    assert first == second
+
+
+def test_compress_if_needed_uses_manager_threshold():
+    context = _fake_context()
+    compressor = ContextCompressor()
+    original_size = compressor.estimate_size(context)
+    manager = ContextManager(max_size=original_size - 80)
+    manager.store("work", context)
+
+    result = manager.compress_if_needed("work")
+
+    assert manager.estimate_size("work") <= manager.max_size
+    assert result == manager.get("work")
+    assert result != context
+
+
+def test_compress_if_needed_leaves_small_context_unchanged():
+    context = _fake_context(1)
+    manager = ContextManager(max_size=10_000)
+    manager.store("work", context)
+
+    result = manager.compress_if_needed("work")
+
+    assert result == context
+    assert manager.get("work") == context
