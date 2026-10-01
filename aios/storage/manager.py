@@ -69,6 +69,27 @@ class StorageManager:
         """
         return self.create(namespace, key, data, metadata=metadata).id
 
+    def store_memory(self, memory: Any, agent_id: Any) -> ArtifactID:
+        """Persist an evicted memory as a JSON artifact in its agent namespace."""
+        if memory.agent_id != agent_id:
+            raise ValueError("memory.agent_id must match agent_id")
+
+        namespace = f"agent-{agent_id}"
+        key = f"memory-{memory.memory_id}.json"
+        payload = {
+            "memory_id": str(memory.memory_id),
+            "agent_id": str(memory.agent_id),
+            "content": memory.content,
+            "metadata": memory.metadata,
+            "created_at": memory.created_at.isoformat(),
+        }
+        return self.store(
+            namespace,
+            key,
+            json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            metadata={"kind": "memory", "memory_id": str(memory.memory_id)},
+        )
+
     def retrieve(self, artifact_id: ArtifactID) -> Artifact:
         """Retrieve artifact metadata by ID.
 
