@@ -20,7 +20,7 @@ State transitions enforced for tasks:
 from __future__ import annotations
 
 import itertools
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -29,9 +29,10 @@ from aios.core.exceptions import DuplicateTaskError, QueueEmptyError
 from aios.core.ids import RequestID, TaskID
 from aios.core.models.request import AgentRequest
 from aios.core.models.task import Task, TaskStatus
+from aios.scheduler.queue import TaskQueue
 
 
-class PriorityTaskQueue:
+class PriorityTaskQueue(TaskQueue):
     """
     Priority-ordered implementation of the TaskQueue interface with anti-starvation.
 
@@ -106,7 +107,10 @@ class PriorityTaskQueue:
         # Find best entry according to (effective_priority, sequence)
         best_idx = min(
             range(len(self._entries)),
-            key=lambda i: (self._effective_priority(self._entries[i]), self._entries[i][1]),
+            key=lambda i: (
+                self._effective_priority(self._entries[i]),
+                self._entries[i][1],
+            ),
         )
         _, _, task, _ = self._entries.pop(best_idx)
         self._ids.discard(task.task_id)
@@ -136,7 +140,10 @@ class PriorityTaskQueue:
 
         best_idx = min(
             range(len(self._entries)),
-            key=lambda i: (self._effective_priority(self._entries[i]), self._entries[i][1]),
+            key=lambda i: (
+                self._effective_priority(self._entries[i]),
+                self._entries[i][1],
+            ),
         )
         return self._entries[best_idx][2]
 
@@ -161,6 +168,8 @@ class PriorityTaskQueue:
 
         for index, (_, _, queued_task, _) in enumerate(self._entries):
             if queued_task.task_id == task_id:
+                # Validate before mutating so an illegal transition leaves
+                # the queue untouched.
                 validate_transition(queued_task.status, TaskStatus.CANCELLED)
                 self._entries.pop(index)
                 self._ids.discard(task_id)
@@ -207,7 +216,10 @@ class PriorityRequestQueue:
 
         best_idx = min(
             range(len(self._entries)),
-            key=lambda i: (self._effective_priority(self._entries[i]), self._entries[i][1]),
+            key=lambda i: (
+                self._effective_priority(self._entries[i]),
+                self._entries[i][1],
+            ),
         )
         _, _, request, _ = self._entries.pop(best_idx)
         self._ids.discard(request.request_id)
@@ -225,7 +237,10 @@ class PriorityRequestQueue:
 
         best_idx = min(
             range(len(self._entries)),
-            key=lambda i: (self._effective_priority(self._entries[i]), self._entries[i][1]),
+            key=lambda i: (
+                self._effective_priority(self._entries[i]),
+                self._entries[i][1],
+            ),
         )
         return self._entries[best_idx][2]
 

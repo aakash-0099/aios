@@ -19,6 +19,9 @@ import pytest
 from aios.core import (
     AgentID,
     AgentRequest,
+    DuplicateTaskError,
+    InvalidStateTransitionError,
+    QueueEmptyError,
     RequestID,
     ResourceError,
     ResourceType,
@@ -27,6 +30,7 @@ from aios.core import (
     SystemCallType,
     Task,
     TaskID,
+    TaskStatus,
     ValidationError,
 )
 from aios.scheduler import (
@@ -39,6 +43,7 @@ from aios.scheduler import (
     ResourceScheduler,
     Scheduler,
     SchedulingStrategy,
+    TaskQueue,
 )
 
 
@@ -417,3 +422,165 @@ def test_scheduler_close_behavior():
 
     with pytest.raises(SchedulerError):
         scheduler.next()
+
+
+# ---------------------------------------------------------------------------
+# 8. Task Queue Contracts (FIFOTaskQueue / PriorityTaskQueue)
+# ---------------------------------------------------------------------------
+
+
+def _make_task(description: str = "work") -> Task:
+    return Task(
+        task_id=TaskID.generate(),
+        agent_id=AgentID.generate(),
+        description=description,
+    )
+
+
+def _queue_factories() -> list:
+    return [FIFOTaskQueue, PriorityTaskQueue]
+
+
+@pytest.mark.parametrize("factory", _queue_factories())
+def test_queue_empty_behavior(factory):
+    """Empty queue: size is 0, dequeue/peek raise, remove returns False."""
+    queue = factory()
+
+    assert queue.size() == 0
+
+    with pytest.raises(QueueEmptyError):
+        queue.dequeue()
+
+    with pytest.raises(QueueEmptyError):
+        queue.peek()
+
+    assert queue.remove(TaskID.generate()) is False
+
+
+@pytest.mark.parametrize("factory", _queue_factories())
+def test_queue_duplicate_id_rejected(factory):
+    """The same task ID cannot be enqueued twice."""
+    queue = factory()
+    task = _make_task()
+
+    queue.enqueue(task)
+
+    with pytest.raises(DuplicateTaskError):
+        queue.enqueue(task)
+
+    assert queue.size() == 1
+
+
+@pytest.mark.parametrize("factory", _queue_factories())
+def test_queue_enqueue_sets_queued_and_dequeue_sets_running(factory):
+    """enqueue transitions CREATED -> QUEUED; dequeue -> RUNNING."""
+    queue = factory()
+    task = _make_task()
+
+    queue.enqueue(task)
+    assert queue.peek().status is TaskStatus.QUEUED
+
+    dequeued = queue.dequeue()
+    assert dequeued.task_id == task.task_id
+    assert dequeued.status is TaskStatus.RUNNING
+
+
+@pytest.mark.parametrize("factory", _queue_factories())
+def test_queue_peek_does_not_mutate(factory):
+    """peek leaves the queue and the peeked task's status untouched."""
+    queue = factory()
+    queue.enqueue(_make_task("first"))
+    queue.enqueue(_make_task("second"))
+
+    first = queue.peek()
+    assert queue.size() == 2
+    assert queue.contains(first.task_id)
+    assert first.status is TaskStatus.QUEUED
+
+    # A second peek is stable.
+    assert queue.peek().task_id == first.task_id
+    assert queue.size() == 2
+
+
+def test_fifo_queue_preserves_insertion_order():
+    """FIFO dequeues in exact insertion order regardless of priority."""
+    queue = FIFOTaskQueue()
+    tasks = [_make_task(f"task-{i}") for i in range(5)]
+
+    for task in tasks:
+        queue.enqueue(task)
+
+    dequeued = [queue.dequeue().task_id for _ in range(len(tasks))]
+    assert dequeued == [task.task_id for task in tasks]
+
+
+def test_priority_queue_orders_lowest_number_first():
+    """Lower priority numbers dequeue first."""
+    queue = PriorityTaskQueue()
+    low = _make_task("low-priority")
+    high = _make_task("high-priority")
+    mid = _make_task("mid-priority")
+
+    # Enqueued out of priority order to prove ordering is not insertion order.
+    queue.enqueue(low, priority=5)
+    queue.enqueue(high, priority=0)
+    queue.enqueue(mid, priority=2)
+
+    assert queue.peek().task_id == high.task_id
+    assert [queue.dequeue().task_id for _ in range(3)] == [
+        high.task_id,
+        mid.task_id,
+        low.task_id,
+    ]
+
+
+def test_priority_queue_is_fifo_within_equal_priority():
+    """Equal priorities fall back to insertion order."""
+    queue = PriorityTaskQueue()
+    tasks = [_make_task(f"task-{i}") for i in range(4)]
+
+    for task in tasks:
+        queue.enqueue(task, priority=1)
+
+    assert [queue.dequeue().task_id for _ in range(4)] == [
+        task.task_id for task in tasks
+    ]
+
+
+@pytest.mark.parametrize("factory", _queue_factories())
+def test_queue_remove_cancels_and_drops(factory):
+    """remove drops the task and reports success; the task leaves the queue."""
+    queue = factory()
+    task = _make_task()
+    other = _make_task("other")
+
+    queue.enqueue(task)
+    queue.enqueue(other)
+
+    assert queue.remove(task.task_id) is True
+    assert queue.size() == 1
+    assert queue.contains(task.task_id) is False
+    assert queue.contains(other.task_id) is True
+
+    # Removing again reports False.
+    assert queue.remove(task.task_id) is False
+
+
+@pytest.mark.parametrize("factory", _queue_factories())
+def test_queue_rejects_task_in_non_enqueueable_state(factory):
+    """A task that is not CREATED cannot be enqueued."""
+    queue = factory()
+    task = _make_task()
+    queue.enqueue(task)
+    running = queue.dequeue()
+    assert running.status is TaskStatus.RUNNING
+
+    # RUNNING -> QUEUED is not a legal transition.
+    with pytest.raises(InvalidStateTransitionError):
+        queue.enqueue(running)
+
+
+def test_queues_satisfy_the_task_queue_protocol():
+    """Both queues conform to the declared TaskQueue interface."""
+    assert isinstance(FIFOTaskQueue(), TaskQueue)
+    assert isinstance(PriorityTaskQueue(), TaskQueue)
