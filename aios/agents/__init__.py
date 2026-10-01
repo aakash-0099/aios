@@ -12,10 +12,10 @@ from .agent_manager import (
     validate_agent_id,
 )
 from .agent_state import (
+    LEGAL_TRANSITIONS,
     AgentLifecycleState,
     AgentState,
     InvalidStateTransitionError,
-    LEGAL_TRANSITIONS,
     is_valid_transition,
     normalize_state,
     validate_transition,
