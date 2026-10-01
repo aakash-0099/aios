@@ -15,7 +15,7 @@ include = ["aios*"]
 
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "aios/storage/tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 

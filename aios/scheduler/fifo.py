@@ -23,9 +23,10 @@ from aios.agents.task import validate_transition
 from aios.core.exceptions import DuplicateTaskError, QueueEmptyError
 from aios.core.ids import TaskID
 from aios.core.models.task import Task, TaskStatus
+from aios.scheduler.queue import TaskQueue
 
 
-class FIFOTaskQueue:
+class FIFOTaskQueue(TaskQueue):
     """
     Strict FIFO implementation of the TaskQueue interface.
 
@@ -38,7 +39,7 @@ class FIFOTaskQueue:
         self._queue: deque[Task] = deque()
         self._ids: set[TaskID] = set()
 
-    def enqueue(self, task: Task) -> None:
+    def enqueue(self, task: Task, priority: int = 0) -> None:
         """
         Add ``task`` to the back of the queue.
 
@@ -116,12 +117,9 @@ class FIFOTaskQueue:
 
         for queued_task in self._queue:
             if queued_task.task_id == task_id:
+                # Validate before mutating so an illegal transition leaves
+                # the queue untouched.
                 validate_transition(queued_task.status, TaskStatus.CANCELLED)
-                cancelled_task = replace(
-                    queued_task,
-                    status=TaskStatus.CANCELLED,
-                    updated_at=datetime.now(timezone.utc),
-                )
                 self._queue.remove(queued_task)
                 self._ids.discard(task_id)
                 return True
