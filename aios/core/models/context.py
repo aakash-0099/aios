@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from aios.core.exceptions import ValidationError
+from aios.core.models.memory import Memory
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,7 @@ class Context:
         default_factory=list
     )
 
-    memory: list[dict[str, Any]] = field(
+    memory: list[dict[str, Any] | Memory] = field(
         default_factory=list
     )
 
@@ -71,11 +72,11 @@ class Context:
             )
 
         if not all(
-            isinstance(item, dict)
+            isinstance(item, (dict, Memory))
             for item in self.memory
         ):
             raise ValidationError(
-                "Every memory item must be a dictionary."
+                "Every memory item must be a dictionary or Memory instance."
             )
 
         if not isinstance(self.working_state, dict):

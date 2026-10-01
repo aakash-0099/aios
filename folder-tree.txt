@@ -1,0 +1,301 @@
++---agents
+|       coding_agent.py
+|       multi_agent_demo.py
+|       research_agent.py
+|       simple_agent.py
+|       
++---aios
+|   |   __init__.py
+|   |   
+|   +---agents
+|   |       agent.py
+|   |       agent_manager.py
+|   |       agent_state.py
+|   |       process.py
+|   |       task.py
+|   |       __init__.py
+|   |       
+|   +---communication
+|   |       ipc.py
+|   |       messages.py
+|   |       protocol.py
+|   |       __init__.py
+|   |       
+|   +---config
+|   |       config.yaml
+|   |       settings.py
+|   |       __init__.py
+|   |       
+|   +---context
+|   |       builder.py
+|   |       compressor.py
+|   |       context.py
+|   |       manager.py
+|   |       switcher.py
+|   |       __init__.py
+|   |       
+|   +---core
+|   |   |   validation.py
+|   |   |   __init__.py
+|   |   |   
+|   |   +---config
+|   |   |   |   settings.py
+|   |   |   |   __init__.py
+|   |   |   |   
+|   |   |   \---__pycache__
+|   |   |           settings.cpython-310.pyc
+|   |   |           __init__.cpython-310.pyc
+|   |   |           
+|   |   +---exceptions
+|   |   |   |   errors.py
+|   |   |   |   __init__.py
+|   |   |   |   
+|   |   |   \---__pycache__
+|   |   |           errors.cpython-310.pyc
+|   |   |           __init__.cpython-310.pyc
+|   |   |           
+|   |   +---ids
+|   |   |   |   identifiers.py
+|   |   |   |   __init__.py
+|   |   |   |   
+|   |   |   \---__pycache__
+|   |   |           identifiers.cpython-310.pyc
+|   |   |           __init__.cpython-310.pyc
+|   |   |           
+|   |   +---models
+|   |   |   |   agent.py
+|   |   |   |   context.py
+|   |   |   |   memory.py
+|   |   |   |   request.py
+|   |   |   |   resource.py
+|   |   |   |   response.py
+|   |   |   |   syscall.py
+|   |   |   |   task.py
+|   |   |   |   tool.py
+|   |   |   |   __init__.py
+|   |   |   |   
+|   |   |   \---__pycache__
+|   |   |           agent.cpython-310.pyc
+|   |   |           context.cpython-310.pyc
+|   |   |           memory.cpython-310.pyc
+|   |   |           request.cpython-310.pyc
+|   |   |           resource.cpython-310.pyc
+|   |   |           response.cpython-310.pyc
+|   |   |           syscall.cpython-310.pyc
+|   |   |           task.cpython-310.pyc
+|   |   |           tool.cpython-310.pyc
+|   |   |           __init__.cpython-310.pyc
+|   |   |           
+|   |   \---__pycache__
+|   |           validation.cpython-310.pyc
+|   |           __init__.cpython-310.pyc
+|   |           
+|   +---kernel
+|   |   |   dispatcher.py
+|   |   |   kernel.py
+|   |   |   lifecycle.py
+|   |   |   queue_backend.py
+|   |   |   runtime.py
+|   |   |   serialization.py
+|   |   |   syscall.py
+|   |   |   __init__.py
+|   |   |   
+|   |   \---handlers
+|   +---llm
+|   |       core.py
+|   |       groq.py
+|   |       mock.py
+|   |       ollama.py
+|   |       openai.py
+|   |       provider.py
+|   |       request.py
+|   |       response.py
+|   |       __init__.py
+|   |       
+|   +---memory
+|   |       long_term.py
+|   |       manager.py
+|   |       memory.py
+|   |       sqlite_store.py
+|   |       store.py
+|   |       vector_store.py
+|   |       working_memory.py
+|   |       __init__.py
+|   |       
+|   +---monitoring
+|   |       events.py
+|   |       logger.py
+|   |       metrics.py
+|   |       tracing.py
+|   |       __init__.py
+|   |       
+|   +---scheduler
+|   |       fifo.py
+|   |       priority.py
+|   |       queue.py
+|   |       resource_scheduler.py
+|   |       scheduler.py
+|   |       __init__.py
+|   |       
+|   +---sdk
+|   |       agent.py
+|   |       client.py
+|   |       llm.py
+|   |       memory.py
+|   |       storage.py
+|   |       tools.py
+|   |       __init__.py
+|   |       
+|   +---security
+|   |       access_control.py
+|   |       permissions.py
+|   |       policy.py
+|   |       sandbox.py
+|   |       __init__.py
+|   |       
+|   +---storage
+|   |       artifact.py
+|   |       filesystem.py
+|   |       manager.py
+|   |       namespace.py
+|   |       __init__.py
+|   |       
+|   +---tools
+|   |   |   executor.py
+|   |   |   manager.py
+|   |   |   registry.py
+|   |   |   tool.py
+|   |   |   __init__.py
+|   |   |   
+|   |   +---builtin
+|   |   |       calculator.py
+|   |   |       filesystem.py
+|   |   |       web_search.py
+|   |   |       
+|   |   \---mcp
+|   |           client.py
+|   |           
+|   \---__pycache__
+|           __init__.cpython-310.pyc
+|           
++---data
+|   |   .gitkeep
+|   |   
+|   +---memory
+|   |       .gitkeep
+|   |       
+|   +---results
+|   |       .gitkeep
+|   |       
+|   \---storage
+|           .gitkeep
+|           
++---docs
+|       access-control.md
+|       architecture.md
+|       context-manager.md
+|       evaluation.md
+|       memory-manager.md
+|       paper-notes.md
+|       scheduler.md
+|       storage-manager.md
+|       system-calls.md
+|       tool-manager.md
+|       
++---evaluation
+|   |   analyze_results.py
+|   |   run_benchmark.py
+|   |   
+|   +---baselines
+|   +---benchmarks
+|   +---experiments
+|   \---metrics
++---scripts
+|       benchmark.py
+|       run_agent.py
+|       run_demo.py
+|       run_kernel.py
+|       
++---tests
+|   +---core
+|   |   |   test_config.py
+|   |   |   test_exceptions.py
+|   |   |   test_ids.py
+|   |   |   test_imports.py
+|   |   |   test_models.py
+|   |   |   test_request_response_contract.py
+|   |   |   test_validation.py
+|   |   |   
+|   |   \---__pycache__
+|   |           test_config.cpython-310-pytest-8.4.2.pyc
+|   |           test_exceptions.cpython-310-pytest-8.4.2.pyc
+|   |           test_ids.cpython-310-pytest-8.4.2.pyc
+|   |           test_imports.cpython-310-pytest-8.4.2.pyc
+|   |           test_models.cpython-310-pytest-8.4.2.pyc
+|   |           test_request_response_contract.cpython-310-pytest-8.4.2.pyc
+|   |           test_validation.cpython-310-pytest-8.4.2.pyc
+|   |           
+|   +---integration
+|   |   |   test_agent_kernel.py
+|   |   |   test_memory_context.py
+|   |   |   test_scheduler_llm.py
+|   |   |   test_tool_execution.py
+|   |   |   
+|   |   \---__pycache__
+|   |           test_agent_kernel.cpython-310-pytest-8.4.2.pyc
+|   |           test_memory_context.cpython-310-pytest-8.4.2.pyc
+|   |           test_scheduler_llm.cpython-310-pytest-8.4.2.pyc
+|   |           test_tool_execution.cpython-310-pytest-8.4.2.pyc
+|   |           
+|   +---system
+|   |   |   test_concurrency.py
+|   |   |   test_multi_agent.py
+|   |   |   test_resource_contention.py
+|   |   |   
+|   |   \---__pycache__
+|   |           test_concurrency.cpython-310-pytest-8.4.2.pyc
+|   |           test_multi_agent.cpython-310-pytest-8.4.2.pyc
+|   |           test_resource_contention.cpython-310-pytest-8.4.2.pyc
+|   |           
+|   \---unit
+|       |   test_access_control.py
+|       |   test_context.py
+|       |   test_ipc.py
+|       |   test_kernel.py
+|       |   test_llm.py
+|       |   test_memory.py
+|       |   test_redis_queue_backend.py
+|       |   test_scheduler.py
+|       |   test_storage.py
+|       |   test_tools.py
+|       |   
+|       \---__pycache__
+|               test_access_control.cpython-310-pytest-8.4.2.pyc
+|               test_context.cpython-310-pytest-8.4.2.pyc
+|               test_kernel.cpython-310-pytest-8.4.2.pyc
+|               test_llm.cpython-310-pytest-8.4.2.pyc
+|               test_memory.cpython-310-pytest-8.4.2.pyc
+|               test_scheduler.cpython-310-pytest-8.4.2.pyc
+|               test_storage.cpython-310-pytest-8.4.2.pyc
+|               test_tools.cpython-310-pytest-8.4.2.pyc
+|               
+\---tools
+    |   executor.py
+    |   manager.py
+    |   registry.py
+    |   tool.py
+    |   __init__.py
+    |   
+    +---builtin
+    |       calculator.py
+    |       filesystem.py
+    |       __init__.py
+    |       
+    \---tests
+            test_builtin.py
+            test_executor.py
+            test_manager.py
+            test_registry.py
+            test_tool.py
+            __init__.py
+            
