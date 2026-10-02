@@ -1,0 +1,220 @@
+All verification is complete. Here is the final report.
+Final Report
+Files created
+File	Purpose
+aios/monitoring/events.py	Frozen TraceEvent dataclass + to_dict/from_dict; KernelEvents constants (the one place event names live, grouped by component)
+aios/monitoring/sinks.py	Sink protocol, NullSink, InMemorySink (thread-safe, events()/clear()), JsonlSink (thread-safe, parent-dir creation, flush per write, idempotent close())
+aios/monitoring/tracer.py	configure/get_sink/reset/emit/dropped_count/capture(); emit swallows sink exceptions into the dropped counter; non-JSON-safe data values coerced with repr()
+aios/monitoring/render.py	load_events, render_timeline, render_lanes (pure functions returning strings) + python -m aios.monitoring.render <file> CLI
+scripts/demo_trace.py	Demo: 3 agents × 3 syscalls concurrently, JsonlSink → traces/demo.jsonl, prints both views; --runs N / --agents N
+tests/unit/test_monitoring.py	16 tests (schema round-trip, no-op default, never-raise + dropped counter, thread-safety 20 threads, JSONL round-trip + concurrent valid JSON, capture restore incl. on exception, exact render strings)
+tests/integration/test_kernel_tracing.py	4 tests (ordered 7-event sequence, 20 concurrent complete sequences, failing handler → failed event, unconfigured responses identical to traced)
+tests/unit/test_check_imports.py	13 synthetic-tree tests proving each new rule can fail and pass
+docs/monitoring.md	58-line doc: schema, enabling, 5-line emit example, naming convention, demo
+Files modified
+File	Change
+aios/monitoring/__init__.py	Was an empty placeholder; now the clean public surface (render functions via lazy __getattr__ so python -m aios.monitoring.render doesn't hit a runpy double-import warning)
+aios/kernel/dispatcher.py	5 emit sites + import
+aios/kernel/syscall.py	3 emit sites + import
+aios/kernel/kernel.py	4 emit sites + import
+scripts/check_imports.py	New allow_from and forbid_unless rule kinds; 3 new rules; from P import N now resolves to P.N (de-dup key extended with dst_module); report_only flag printed as [report-only] and excluded from --strict; table header now "import names"
+docs/dev-setup.md	Expected counts stated with and without Redis (546+2 with, 546+8 without) and how REDIS_URL selects the server
+.gitignore	Added traces/
+The empty placeholders aios/monitoring/{metrics,logger,tracing}.py were left untouched.
+Exact emit() locations (file:line)
+dispatcher.py:272  submit()      syscall.created      (after SysCall construction)
+dispatcher.py:291  submit()      syscall.queued       (after queue_backend.put)
+dispatcher.py:345  _execute()    syscall.failed       (except SystemCallError; exc_type+error)
+dispatcher.py:360  _execute()    syscall.validated    (after handler resolve)
+dispatcher.py:369  _execute()    syscall.started      (after bind_handler, before start())
+syscall.py:106     run()         syscall.handler_invoked (before handler call)
+syscall.py:118     run()         syscall.failed       (except; exc_type+error)
+syscall.py:130     run()         syscall.completed    (else)
+kernel.py:93       handle()      response.returned   (submit raised AIOSException)
+kernel.py:113      handle()      response.returned   (timeout)
+kernel.py:131      handle()      response.returned   (syscall.error)
+kernel.py:145      handle()      response.returned   (success)
+All pass correlation_id=str(request.request_id) and agent_id=str(request.agent_id). syscall.started is emitted before syscall.start() so the full per-correlation ordering (created→queued→validated→started→handler_invoked→completed/failed→response_returned) is guaranteed by happens-before, not luck.
+Test counts
+- Before: 546 passed, 2 skipped (Redis reachable in this environment, so the 6 Redis tests passed)
+- After: 579 passed, 2 skipped — 33 new tests, zero regressions
+Demo output (python scripts/demo_trace.py --runs 3 --agents 3)
+trace file: C:\Users\aakash.sharma\OneDrive - Ampcus Tech Pvt Ltd\Desktop\aios\traces\demo.jsonl
+63 events, 0 dropped
+
+TIMELINE
+correlation=09d5fef4-7af3-440f-9bb5-2d36fefb6432 agent=3607443a-0293-41b0-a3df-3aea9cfe6dac events=7 duration=63.0 ms
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.created  call_type=llm_call pid=1
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.queued  call_type=llm_call pid=1
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.validated  call_type=llm_call
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.started  call_type=llm_call pid=1
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.handler_invoked  call_type=llm_call
+  +   63.0 ms  (+  63.0 ms)  [kernel]  syscall.completed  call_type=llm_call
+  +   63.0 ms  (+   0.0 ms)  [kernel]  response.returned  status=success
+
+correlation=92b73131-e129-412b-92e2-5fe8d685d691 agent=943ec12b-0421-4fac-a94f-456a22ae1489 events=7 duration=63.0 ms
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.created  call_type=tool_call pid=3
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.queued  call_type=tool_call pid=3
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.validated  call_type=tool_call
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.started  call_type=tool_call pid=3
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.handler_invoked  call_type=tool_call
+  +   63.0 ms  (+  63.0 ms)  [kernel]  syscall.completed  call_type=tool_call
+  +   63.0 ms  (+   0.0 ms)  [kernel]  response.returned  status=success
+
+correlation=d4d25361-bc2e-4de9-a6d5-8e9437ebf7eb agent=492979bd-3d23-4123-9dc8-59218dd2bea5 events=7 duration=63.0 ms
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.created  call_type=storage_write pid=2
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.queued  call_type=storage_write pid=2
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.validated  call_type=storage_write
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.started  call_type=storage_write pid=2
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.handler_invoked  call_type=storage_write
+  +   63.0 ms  (+  63.0 ms)  [kernel]  syscall.completed  call_type=storage_write
+  +   63.0 ms  (+   0.0 ms)  [kernel]  response.returned  status=success
+
+correlation=1fe490a8-fb37-4cd8-be24-9a8e4fbdd379 agent=18e5f06f-67e2-41fd-8d3a-328b26e2e2bf events=7 duration=47.0 ms
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.created  call_type=llm_call pid=6
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.queued  call_type=llm_call pid=6
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.validated  call_type=llm_call
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.started  call_type=llm_call pid=6
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.handler_invoked  call_type=llm_call
+  +   47.0 ms  (+  47.0 ms)  [kernel]  syscall.completed  call_type=llm_call
+  +   47.0 ms  (+   0.0 ms)  [kernel]  response.returned  status=success
+
+correlation=d944b726-de04-4d05-a80c-24ab7aaf8b32 agent=b64a98a6-7af3-434a-8893-7c2a070cd359 events=7 duration=47.0 ms
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.created  call_type=memory_read pid=5
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.queued  call_type=memory_read pid=5
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.validated  call_type=memory_read
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.started  call_type=memory_read pid=5
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.handler_invoked  call_type=memory_read
+  +   47.0 ms  (+  47.0 ms)  [kernel]  syscall.completed  call_type=memory_read
+  +   47.0 ms  (+   0.0 ms)  [kernel]  response.returned  status=success
+
+correlation=e455bfe5-ba50-4c40-822b-4df76ca43ada agent=f5808c18-5c73-429b-b4bd-566682e3a050 events=7 duration=47.0 ms
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.created  call_type=storage_write pid=4
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.queued  call_type=storage_write pid=4
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.validated  call_type=storage_write
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.started  call_type=storage_write pid=4
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.handler_invoked  call_type=storage_write
+  +   47.0 ms  (+  47.0 ms)  [kernel]  syscall.completed  call_type=storage_write
+  +   47.0 ms  (+   0.0 ms)  [kernel]  response.returned  status=success
+
+correlation=4f392a8e-e812-443e-96c6-6775850a933b agent=cde8202d-65aa-4928-bb1a-594f11293d54 events=7 duration=62.0 ms
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.created  call_type=llm_call pid=8
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.queued  call_type=llm_call pid=8
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.validated  call_type=llm_call
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.started  call_type=llm_call pid=8
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.handler_invoked  call_type=llm_call
+  +   62.0 ms  (+  62.0 ms)  [kernel]  syscall.completed  call_type=llm_call
+  +   62.0 ms  (+   0.0 ms)  [kernel]  response.returned  status=success
+
+correlation=9d3820a9-2560-42f9-85a4-6eb29dbd6905 agent=13617edb-ef76-4afb-ad4d-0bce0ac4b8cc events=7 duration=47.0 ms
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.created  call_type=tool_call pid=7
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.queued  call_type=tool_call pid=7
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.validated  call_type=tool_call
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.started  call_type=tool_call pid=7
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.handler_invoked  call_type=tool_call
+  +   47.0 ms  (+  47.0 ms)  [kernel]  syscall.completed  call_type=tool_call
+  +   47.0 ms  (+   0.0 ms)  [kernel]  response.returned  status=success
+
+correlation=d3fbdbcf-585e-463f-9b67-fe8d220fce3e agent=0487940c-22d7-47f5-9fb0-74d1e5a12cc0 events=7 duration=62.0 ms
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.created  call_type=memory_read pid=9
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.queued  call_type=memory_read pid=9
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.validated  call_type=memory_read
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.started  call_type=memory_read pid=9
+  +    0.0 ms  (+   0.0 ms)  [kernel]  syscall.handler_invoked  call_type=memory_read
+  +   62.0 ms  (+  62.0 ms)  [kernel]  syscall.completed  call_type=memory_read
+  +   62.0 ms  (+   0.0 ms)  [kernel]  response.returned  status=success
+
+LANES
+agent=0487940c-22d7-47f5-9fb0-74d1e5a12cc0 events=7
+  +  110.0 ms  [kernel]  syscall.created  cid=d3fbdbcf  call_type=memory_read pid=9
+  +  110.0 ms  [kernel]  syscall.queued  cid=d3fbdbcf  call_type=memory_read pid=9
+  +  110.0 ms  [kernel]  syscall.validated  cid=d3fbdbcf  call_type=memory_read
+  +  110.0 ms  [kernel]  syscall.started  cid=d3fbdbcf  call_type=memory_read pid=9
+  +  110.0 ms  [kernel]  syscall.handler_invoked  cid=d3fbdbcf  call_type=memory_read
+  +  172.0 ms  [kernel]  syscall.completed  cid=d3fbdbcf  call_type=memory_read
+  +  172.0 ms  [kernel]  response.returned  cid=d3fbdbcf  status=success
+
+agent=13617edb-ef76-4afb-ad4d-0bce0ac4b8cc events=7
+  +  110.0 ms  [kernel]  syscall.created  cid=9d3820a9  call_type=tool_call pid=7
+  +  110.0 ms  [kernel]  syscall.queued  cid=9d3820a9  call_type=tool_call pid=7
+  +  110.0 ms  [kernel]  syscall.validated  cid=9d3820a9  call_type=tool_call
+  +  110.0 ms  [kernel]  syscall.started  cid=9d3820a9  call_type=tool_call pid=7
+  +  110.0 ms  [kernel]  syscall.handler_invoked  cid=9d3820a9  call_type=tool_call
+  +  157.0 ms  [kernel]  syscall.completed  cid=9d3820a9  call_type=tool_call
+  +  157.0 ms  [kernel]  response.returned  cid=9d3820a9  status=success
+
+agent=18e5f06f-67e2-41fd-8d3a-328b26e2e2bf events=7
+  +   63.0 ms  [kernel]  syscall.created  cid=1fe490a8  call_type=llm_call pid=6
+  +   63.0 ms  [kernel]  syscall.queued  cid=1fe490a8  call_type=llm_call pid=6
+  +   63.0 ms  [kernel]  syscall.validated  cid=1fe490a8  call_type=llm_call
+  +   63.0 ms  [kernel]  syscall.started  cid=1fe490a8  call_type=llm_call pid=6
+  +   63.0 ms  [kernel]  syscall.handler_invoked  cid=1fe490a8  call_type=llm_call
+  +  110.0 ms  [kernel]  syscall.completed  cid=1fe490a8  call_type=llm_call
+  +  110.0 ms  [kernel]  response.returned  cid=1fe490a8  status=success
+
+agent=3607443a-0293-41b0-a3df-3aea9cfe6dac events=7
+  +    0.0 ms  [kernel]  syscall.created  cid=09d5fef4  call_type=llm_call pid=1
+  +    0.0 ms  [kernel]  syscall.queued  cid=09d5fef4  call_type=llm_call pid=1
+  +    0.0 ms  [kernel]  syscall.validated  cid=09d5fef4  call_type=llm_call
+  +    0.0 ms  [kernel]  syscall.started  cid=09d5fef4  call_type=llm_call pid=1
+  +    0.0 ms  [kernel]  syscall.handler_invoked  cid=09d5fef4  call_type=llm_call
+  +   63.0 ms  [kernel]  syscall.completed  cid=09d5fef4  call_type=llm_call
+  +   63.0 ms  [kernel]  response.returned  cid=09d5fef4  status=success
+
+agent=492979bd-3d23-4123-9dc8-59218dd2bea5 events=7
+  +    0.0 ms  [kernel]  syscall.created  cid=d4d25361  call_type=storage_write pid=2
+  +    0.0 ms  [kernel]  syscall.queued  cid=d4d25361  call_type=storage_write pid=2
+  +    0.0 ms  [kernel]  syscall.validated  cid=d4d25361  call_type=storage_write
+  +    0.0 ms  [kernel]  syscall.started  cid=d4d25361  call_type=storage_write pid=2
+  +    0.0 ms  [kernel]  syscall.handler_invoked  cid=d4d25361  call_type=storage_write
+  +   63.0 ms  [kernel]  syscall.completed  cid=d4d25361  call_type=storage_write
+  +   63.0 ms  [kernel]  response.returned  cid=d4d25361  status=success
+
+agent=943ec12b-0421-4fac-a94f-456a22ae1489 events=7
+  +    0.0 ms  [kernel]  syscall.created  cid=92b73131  call_type=tool_call pid=3
+  +    0.0 ms  [kernel]  syscall.queued  cid=92b73131  call_type=tool_call pid=3
+  +    0.0 ms  [kernel]  syscall.validated  cid=92b73131  call_type=tool_call
+  +    0.0 ms  [kernel]  syscall.started  cid=92b73131  call_type=tool_call pid=3
+  +    0.0 ms  [kernel]  syscall.handler_invoked  cid=92b73131  call_type=tool_call
+  +   63.0 ms  [kernel]  syscall.completed  cid=92b73131  call_type=tool_call
+  +   63.0 ms  [kernel]  response.returned  cid=92b73131  status=success
+
+agent=b64a98a6-7af3-434a-8893-7c2a070cd359 events=7
+  +   63.0 ms  [kernel]  syscall.created  cid=d944b726  call_type=memory_read pid=5
+  +   63.0 ms  [kernel]  syscall.queued  cid=d944b726  call_type=memory_read pid=5
+  +   63.0 ms  [kernel]  syscall.validated  cid=d944b726  call_type=memory_read
+  +   63.0 ms  [kernel]  syscall.started  cid=d944b726  call_type=memory_read pid=5
+  +   63.0 ms  [kernel]  syscall.handler_invoked  cid=d944b726  call_type=memory_read
+  +  110.0 ms  [kernel]  syscall.completed  cid=d944b726  call_type=memory_read
+  +  110.0 ms  [kernel]  response.returned  cid=d944b726  status=success
+
+agent=cde8202d-65aa-4928-bb1a-594f11293d54 events=7
+  +  110.0 ms  [kernel]  syscall.created  cid=4f392a8e  call_type=llm_call pid=8
+  +  110.0 ms  [kernel]  syscall.queued  cid=4f392a8e  call_type=llm_call pid=8
+  +  110.0 ms  [kernel]  syscall.validated  cid=4f392a8e  call_type=llm_call
+  +  110.0 ms  [kernel]  syscall.started  cid=4f392a8e  call_type=llm_call pid=8
+  +  110.0 ms  [kernel]  syscall.handler_invoked  cid=4f392a8e  call_type=llm_call
+  +  172.0 ms  [kernel]  syscall.completed  cid=4f392a8e  call_type=llm_call
+  +  172.0 ms  [kernel]  response.returned  cid=4f392a8e  status=success
+
+agent=f5808c18-5c73-429b-b4bd-566682e3a050 events=7
+  +   63.0 ms  [kernel]  syscall.created  cid=e455bfe5  call_type=storage_write pid=4
+  +   63.0 ms  [kernel]  syscall.queued  cid=e455bfe5  call_type=storage_write pid=4
+  +   63.0 ms  [kernel]  syscall.validated  cid=e455bfe5  call_type=storage_write
+  +   63.0 ms  [kernel]  syscall.started  cid=e455bfe5  call_type=storage_write pid=4
+  +   63.0 ms  [kernel]  syscall.handler_invoked  cid=e455bfe5  call_type=storage_write
+  +  110.0 ms  [kernel]  syscall.completed  cid=e455bfe5  call_type=storage_write
+  +  110.0 ms  [kernel]  response.returned  cid=e455bfe5  status=success
+The lanes view makes the 4-worker bound visible: agents start in three waves (0 ms, 63 ms, 110 ms) as workers free up.
+Other verification results
+- scripts/check_imports.py --strict: 0 violations, 0 cycles, exit 0. New aios.kernel -> aios.monitoring edge appears under "observed but not covered by a rule" (report-only section, as expected).
+- Ruff (project config: E/F/I, 88 cols): clean on all new/changed files. One remaining E501 at aios/kernel/dispatcher.py:379 (register_handler signature) is pre-existing — confirmed present in HEAD before my change; left untouched per instructions.
+- Overhead: 10,000 emit() calls with NullSink = 15.15 ms → 1.52 µs/call.
+Notes / things I was unsure about
+1. Behaviour preservation: kernel edits only add emit(...) calls and read-only local assignments (correlation_id/agent_id/call_type). No signatures, return values, ordering, or locking changed; the integration test asserts traced and unconfigured runs produce identical responses.
+2. syscall.started placement: emitted in _execute before syscall.start() (not inside run()) so the started→handler_invoked order is guaranteed by thread-creation happens-before, making the full 7-event sequence deterministic per correlation id.
+3. Checker count semantics: resolving from P import N → P.N means multi-alias imports count once per alias; the table header was updated from "import statements" to "import names" to stay honest.
+4. Demo script needed a sys.path bootstrap (sys.path.insert(0, repo_root)) because python scripts/demo_trace.py doesn't inherit pytest's pythonpath=["."].
+5. Render functions in __init__.py are lazily imported (PEP 562) — still in __all__ and importable as from aios.monitoring import render_timeline, but avoids the runpy "already in sys.modules" warning for the CLI.
+6. The report-only forbid_unless:* kernel rule is currently vacuous (only aios.kernel imports itself) but is proven to fire by a synthetic test; --strict ignores it.
+Nothing was committed — all changes are left in the working tree for you to review.

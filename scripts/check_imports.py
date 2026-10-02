@@ -9,7 +9,7 @@ and checks a fixed set of layering rules.
 
 The layering rules live in the single data structure :data:`RULES` near the
 top of this file; **that is the only place you need to edit to change the
-policy.**  Each rule is a :class:`Rule` with one of three kinds:
+policy.**  Each rule is a :class:`Rule` with one of five kinds:
 
 ``allow``
     the package may import only the listed packages (anything else is a
@@ -18,7 +18,15 @@ policy.**  Each rule is a :class:`Rule` with one of three kinds:
     the package may import everything *except* the listed packages;
 ``pair_forbid``
     a sub-package-to-sub-package restriction (``aios.agents.task`` may not
-    import ``aios.agents.agent_manager``).
+    import ``aios.agents.agent_manager``);
+``allow_from``
+    the package may import from the listed packages *only* through the
+    sub-modules named in ``allowed`` (``aios.scheduler`` may import
+    from ``aios.agents`` only via ``aios.agents.task``);
+``forbid_unless``
+    like ``forbid``, but edges whose source is inside ``exempt`` are
+    permitted; ``subject="*"`` applies the rule to every package.
+    Used for report-only observations that should not fail ``--strict``.
 
 A rule subject is matched as a *package prefix*, so ``aios.agents`` also
 governs ``aios.agents.task``, and a target matches a package and all of its
@@ -83,6 +91,11 @@ class Rule:
       * ``"pair_forbid"`` -- same as ``"forbid"`` but the subject is a
                            sub-package path (``aios.agents.task``) rather
                            than a top-level package.
+      * ``"allow_from"`` -- imports from ``targets`` are permitted only
+                           through the sub-modules listed in ``allowed``.
+      * ``"forbid_unless"`` -- like ``"forbid"``, but sources inside
+                           ``exempt`` are permitted; ``subject="*"``
+                           applies the rule to every package.
     """
 
     kind: str
@@ -90,6 +103,8 @@ class Rule:
     targets: frozenset[str]
     reason: str
     exempt: frozenset[str] = field(default_factory=frozenset)
+    allowed: frozenset[str] = field(default_factory=frozenset)
+    report_only: bool = False
 
 
 RULES: tuple[Rule, ...] = (
@@ -151,6 +166,31 @@ RULES: tuple[Rule, ...] = (
         targets=frozenset({"aios.kernel", "aios.scheduler"}),
         reason="agent_manager is wired by the Kernel, it must not import it",
     ),
+    Rule(
+        kind="allow_from",
+        subject="aios.scheduler",
+        targets=frozenset({"aios.agents"}),
+        allowed=frozenset({"aios.agents.task"}),
+        reason="scheduler may depend on aios.agents only through the "
+        "aios.agents.task module",
+    ),
+    Rule(
+        kind="allow",
+        subject="aios.monitoring",
+        targets=frozenset({"aios.core"}),
+        exempt=frozenset(),
+        reason="monitoring is a leaf observability layer and may only "
+        "depend on core",
+    ),
+    Rule(
+        kind="forbid_unless",
+        subject="*",
+        targets=frozenset({"aios.kernel"}),
+        exempt=frozenset({"aios.kernel"}),
+        reason="only aios.kernel may import aios.kernel; a future wiring "
+        "layer is the planned exception",
+        report_only=True,
+    ),
 )
 
 # --------------------------------------------------------------------------
@@ -191,6 +231,7 @@ class Violation:
     file: str
     line: int
     reason: str
+    report_only: bool = False
 
 
 def iter_source_files(base: Path) -> list[Path]:
@@ -280,10 +321,19 @@ def extract_imports(path: Path) -> list[tuple[str, int]]:
         elif isinstance(node, ast.ImportFrom):
             if node.level:
                 resolved = resolve_relative(node.module, node.level, pkg_parts)
-                if resolved:
-                    found.append((resolved, node.lineno))
+                if not resolved:
+                    continue
+                base = resolved
             elif node.module:
-                found.append((node.module, node.lineno))
+                base = node.module
+            else:
+                continue
+            # Record the most specific name statically resolvable:
+            # `from P import N` -> P.N, so sub-package rules can tell
+            # which member of P was imported (aios.agents.task vs
+            # aios.agents.agent_manager, for example).
+            for alias in node.names:
+                found.append((f"{base}.{alias.name}", node.lineno))
     return found
 
 
@@ -313,13 +363,14 @@ def build_graph(base: Path) -> list[Edge]:
                     dst_module=module,
                 )
             )
-    # de-duplicate identical (src, dst, file, line) records
-    seen: set[tuple[str, str, str, int]] = set()
+    # de-duplicate identical (src, dst, file, line, dst_module) records
+    seen: set[tuple[str, str, str, int, str]] = set()
     unique: list[Edge] = []
     for e in sorted(edges, key=lambda e: e.sort_key):
-        if e.sort_key in seen:
+        key = (*e.sort_key, e.dst_module)
+        if key in seen:
             continue
-        seen.add(e.sort_key)
+        seen.add(key)
         unique.append(e)
     return unique
 
@@ -371,6 +422,14 @@ def rule_covers(rule: Rule, edge: Edge) -> bool:
     * ``forbid``/``pair_forbid`` on a sub-package -- governs only edges
       originating inside that sub-package, and again only the listed targets.
     """
+    if rule.kind == "allow_from":
+        if not within(edge.src_module, rule.subject):
+            return False
+        return any(within(edge.dst_module, t) for t in rule.targets)
+    if rule.kind == "forbid_unless":
+        if rule.subject != "*" and not within(edge.src_module, rule.subject):
+            return False
+        return any(within(edge.dst_module, t) for t in rule.targets)
     if not within(edge.src_module, rule.subject):
         return False
     if rule.kind == "allow":
@@ -387,6 +446,12 @@ def rule_allows(rule: Rule, edge: Edge) -> bool:
             or any(within(edge.dst_module, t) for t in rule.targets)
             or any(within(edge.dst_module, t) for t in rule.exempt)
         )
+    if rule.kind == "allow_from":
+        return any(within(edge.dst_module, a) for a in rule.allowed)
+    if rule.kind == "forbid_unless":
+        if any(within(edge.src_module, e) for e in rule.exempt):
+            return True
+        return not any(within(edge.dst_module, t) for t in rule.targets)
     # forbid / pair_forbid: anything not explicitly listed is permitted
     return not any(within(edge.dst_module, t) for t in rule.targets)
 
@@ -406,6 +471,7 @@ def check_rules(edges: list[Edge]) -> list[Violation]:
                     file=edge.file,
                     line=edge.line,
                     reason=rule.reason,
+                    report_only=rule.report_only,
                 )
             )
     violations.sort(key=lambda v: (v.src, v.dst, v.file, v.line))
@@ -498,7 +564,7 @@ def main(argv: list[str] | None = None) -> int:
         print(render_mermaid(counts))
     else:
         print("=" * 70)
-        print("PACKAGE DEPENDENCY TABLE (importer -> imported : import statements)")
+        print("PACKAGE DEPENDENCY TABLE (importer -> imported : import names)")
         print("=" * 70)
         print(render_table(counts))
         print(
@@ -509,7 +575,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"LAYERING VIOLATIONS: {len(violations)}")
         if violations:
             for v in violations:
-                print(f"  {v.file}:{v.line}: {v.src} -> {v.dst}  [{v.rule}] {v.reason}")
+                suffix = "  [report-only]" if v.report_only else ""
+                print(
+                    f"  {v.file}:{v.line}: {v.src} -> {v.dst}"
+                    f"  [{v.rule}] {v.reason}{suffix}"
+                )
         else:
             print("  (none)")
         print()
@@ -530,7 +600,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("  (none)")
 
-    if args.strict and (violations or cycles):
+    enforced = [v for v in violations if not v.report_only]
+    if args.strict and (enforced or cycles):
         return 1
     return 0
 

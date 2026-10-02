@@ -16,7 +16,8 @@ from typing import Any
 
 from aios.core.models import AgentRequest
 from aios.kernel.lifecycle import SysCallLifecycle
-
+from aios.monitoring import emit
+from aios.monitoring.events import KernelEvents
 
 # Monotonically increasing syscall identifiers.
 # Unique for the lifetime of this Python process.
@@ -89,6 +90,10 @@ class SysCall(Thread):
         always signaled.
         """
 
+        correlation_id = str(self.request.request_id)
+        agent_id = str(self.request.agent_id)
+        call_type = self.request.syscall.call_type.value
+
         self.lifecycle.mark_started()
 
         try:
@@ -97,14 +102,37 @@ class SysCall(Thread):
                     "No handler is bound to this syscall."
                 )
 
+            emit(
+                "kernel",
+                KernelEvents.SYSCALL_HANDLER_INVOKED,
+                correlation_id=correlation_id,
+                agent_id=agent_id,
+                call_type=call_type,
+            )
             self.response = self.handler(self.request)
 
         except Exception as exc:  # noqa: BLE001
             self.error = str(exc)
             self.lifecycle.mark_failed()
+            emit(
+                "kernel",
+                KernelEvents.SYSCALL_FAILED,
+                correlation_id=correlation_id,
+                agent_id=agent_id,
+                call_type=call_type,
+                exc_type=type(exc).__name__,
+                error=str(exc),
+            )
 
         else:
             self.lifecycle.mark_completed()
+            emit(
+                "kernel",
+                KernelEvents.SYSCALL_COMPLETED,
+                correlation_id=correlation_id,
+                agent_id=agent_id,
+                call_type=call_type,
+            )
 
         finally:
             # The Kernel may be waiting on this event.

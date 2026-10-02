@@ -24,6 +24,8 @@ from aios.core.models import (
 from aios.kernel.dispatcher import HandlerRegistry
 from aios.kernel.runtime import KernelRuntime
 from aios.kernel.syscall import SysCallHandler
+from aios.monitoring import emit
+from aios.monitoring.events import KernelEvents
 
 #: Default time the kernel will wait for a syscall before treating
 #: it as failed. `None` disables the timeout entirely.
@@ -78,12 +80,23 @@ class Kernel:
                 "request must be an AgentRequest."
             )
 
+        correlation_id = str(request.request_id)
+        agent_id = str(request.agent_id)
+
         try:
             syscall = self._runtime.submit(
                 request,
                 agent_name=agent_name or str(request.agent_id),
             )
         except AIOSException as exc:
+            emit(
+                "kernel",
+                KernelEvents.RESPONSE_RETURNED,
+                correlation_id=correlation_id,
+                agent_id=agent_id,
+                status=RequestStatus.FAILED.value,
+                error=str(exc),
+            )
             return AgentResponse(
                 request_id=request.request_id,
                 status=RequestStatus.FAILED,
@@ -96,6 +109,14 @@ class Kernel:
         )
 
         if not completed:
+            emit(
+                "kernel",
+                KernelEvents.RESPONSE_RETURNED,
+                correlation_id=correlation_id,
+                agent_id=agent_id,
+                status=RequestStatus.FAILED.value,
+                error="timeout",
+            )
             return AgentResponse(
                 request_id=request.request_id,
                 status=RequestStatus.FAILED,
@@ -106,12 +127,27 @@ class Kernel:
             )
 
         if syscall.error is not None:
+            emit(
+                "kernel",
+                KernelEvents.RESPONSE_RETURNED,
+                correlation_id=correlation_id,
+                agent_id=agent_id,
+                status=RequestStatus.FAILED.value,
+                error=syscall.error,
+            )
             return AgentResponse(
                 request_id=request.request_id,
                 status=RequestStatus.FAILED,
                 error=syscall.error,
             )
 
+        emit(
+            "kernel",
+            KernelEvents.RESPONSE_RETURNED,
+            correlation_id=correlation_id,
+            agent_id=agent_id,
+            status=RequestStatus.SUCCESS.value,
+        )
         return AgentResponse(
             request_id=request.request_id,
             status=RequestStatus.SUCCESS,

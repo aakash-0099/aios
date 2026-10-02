@@ -34,8 +34,20 @@ Plain `pytest` from the repo root runs the whole suite. Config lives in
 .\.venv\Scripts\python.exe -m pytest --collect-only -q # list node IDs
 ```
 
-Expected: **546 passed, 2 skipped**. Both skips are the symlink escape tests
-in `aios/storage/tests/`, which are Windows-specific and expected to skip.
+Expected results, depending on whether a Redis server is reachable:
+
+| Redis server | Result |
+| --- | --- |
+| reachable at `REDIS_URL` | **546 passed, 2 skipped** |
+| not reachable | **546 passed, 8 skipped** |
+
+The 2 skips are the symlink escape tests in `aios/storage/tests/`, which
+are Windows-specific and expected to skip. The 6 extra skips are the Redis
+tests in `tests/unit/test_redis_queue_backend.py`, which skip themselves
+when no server is reachable. `REDIS_URL` (default `redis://localhost:6379/0`)
+selects the server -- see [Run the Redis tests](#run-the-redis-tests)
+below.
+
 `aios/llm/tests/` only re-exports tests from `tests/unit/` and
 `tests/integration/`, so it sits outside `testpaths` on purpose -- including
 it would collect those tests twice.

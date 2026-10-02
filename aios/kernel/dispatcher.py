@@ -40,6 +40,8 @@ from aios.kernel.queue_backend import (
 )
 from aios.kernel.serialization import request_to_dict
 from aios.kernel.syscall import SysCall, SysCallHandler
+from aios.monitoring import emit
+from aios.monitoring.events import KernelEvents
 
 #: How often a worker re-checks its stop event while the queue
 #: backend has nothing for it. Bounds shutdown latency.
@@ -262,6 +264,18 @@ class Dispatcher:
         """
 
         syscall = SysCall(agent_name=agent_name, request=request, handler=None)
+        correlation_id = str(request.request_id)
+        agent_id = str(request.agent_id)
+        call_type = request.syscall.call_type.value
+
+        emit(
+            "kernel",
+            KernelEvents.SYSCALL_CREATED,
+            correlation_id=correlation_id,
+            agent_id=agent_id,
+            call_type=call_type,
+            pid=syscall.pid,
+        )
 
         with self._lock:
             self._pending[syscall.pid] = syscall
@@ -272,6 +286,15 @@ class Dispatcher:
             request=request_to_dict(request),
         )
         self._queue_backend.put(envelope)
+
+        emit(
+            "kernel",
+            KernelEvents.SYSCALL_QUEUED,
+            correlation_id=correlation_id,
+            agent_id=agent_id,
+            call_type=call_type,
+            pid=syscall.pid,
+        )
 
         return syscall
 
@@ -311,16 +334,45 @@ class Dispatcher:
             # it is silently dropped rather than executed blind.
             return
 
+        correlation_id = str(syscall.request.request_id)
+        agent_id = str(syscall.request.agent_id)
+        call_type = syscall.request.syscall.call_type.value
+
         try:
             handler = self._registry.resolve(syscall.request.syscall.call_type)
         except SystemCallError as exc:
+            emit(
+                "kernel",
+                KernelEvents.SYSCALL_FAILED,
+                correlation_id=correlation_id,
+                agent_id=agent_id,
+                call_type=call_type,
+                exc_type=type(exc).__name__,
+                error=str(exc),
+            )
             syscall.lifecycle.mark_started()
             syscall.error = str(exc)
             syscall.lifecycle.mark_failed()
             syscall.event.set()
             return
 
+        emit(
+            "kernel",
+            KernelEvents.SYSCALL_VALIDATED,
+            correlation_id=correlation_id,
+            agent_id=agent_id,
+            call_type=call_type,
+        )
+
         syscall.bind_handler(handler)
+        emit(
+            "kernel",
+            KernelEvents.SYSCALL_STARTED,
+            correlation_id=correlation_id,
+            agent_id=agent_id,
+            call_type=call_type,
+            pid=syscall.pid,
+        )
         syscall.start()
         syscall.join()
 
