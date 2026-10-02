@@ -30,4 +30,7 @@ __all__ = [
     "ProviderError",
     "ProviderNetworkError",
     "ProviderResponseError",
+    "MockProvider",
+    "MockScenario",
+    "LLMCore",
 ]
