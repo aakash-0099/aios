@@ -9,7 +9,10 @@ provider can be swapped without touching call sites.
 
 from __future__ import annotations
 
-from .mock import MockProvider
+from .groq import GroqProvider
+from .mock import MockLLM, MockProvider  # noqa: F401  (re-exported)
+from .ollama import OllamaProvider
+from .openai import OpenAIProvider
 from .provider import Provider
 from .request import LLMPayload
 from .response import LLMResult
@@ -51,17 +54,35 @@ class LLMCore:
         (``llm_provider`` field) so that callers never need to import a
         concrete provider directly.
 
+        The supported names mirror exactly the values accepted by
+        ``AIOSSettings.llm_provider`` so that string-based configuration and
+        this factory cannot drift apart.
+
         Args:
-            name: Provider name (case-insensitive).  Currently supported:
-                ``'mock'``.
+            name: Provider name (case-insensitive).  Supported: ``'mock'``,
+                ``'openai'``, ``'groq'``, ``'ollama'``.
             **kwargs: Forwarded verbatim to the chosen provider constructor.
 
         Raises:
             ValueError: When *name* does not match a supported provider.
+
+        Note:
+            Constructing a real provider never requires credentials; a missing
+            key raises ``ProviderCredentialsError`` only when ``generate()``
+            is called.
         """
         name = name.strip().lower()
-        if name == "mock":
-            return cls(MockProvider(**kwargs))  # type: ignore[arg-type]
-        raise ValueError(
-            f"unknown provider {name!r}; supported: 'mock'"
-        )
+        providers: dict[str, type[Provider]] = {
+            "mock": MockLLM,
+            "openai": OpenAIProvider,
+            "groq": GroqProvider,
+            "ollama": OllamaProvider,
+        }
+        try:
+            provider_cls = providers[name]
+        except KeyError:
+            supported = ", ".join(repr(key) for key in providers)
+            raise ValueError(
+                f"unknown provider {name!r}; supported: {supported}"
+            ) from None
+        return cls(provider_cls(**kwargs))  # type: ignore[arg-type]
