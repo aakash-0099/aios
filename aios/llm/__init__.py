@@ -1,5 +1,7 @@
-"""LLM request, response, and external provider adapter interfaces."""
+"""LLM request, provider interface, mock provider, and core dispatcher."""
 
+from .core import LLMCore
+from .mock import MockProvider, MockScenario
 from __future__ import annotations
 
 from .errors import (

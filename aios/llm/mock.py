@@ -1,91 +1,140 @@
+"""
+Deterministic Mock LLM Provider.
+
+Provides a fully local, network-free LLM provider for unit testing and
+development. Key properties:
+
+- Deterministic: identical payloads always yield identical results.
+- Configurable: success responses and failure scenarios are set at
+  construction time and never change after that.
+- Observable: every received payload is recorded for later inspection.
+- Latency simulation: an optional fixed sleep is injected before each
+  response so callers can test timeout/latency handling.
+
+No API keys, external services, or network sockets are used.
+"""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass, field
+from typing import Any
 
 from .provider import Provider
 from .request import LLMPayload
 from .response import LLMResult
 
 
-class MockLLM(Provider):
-    """Reference in-memory mock LLM provider for tests and local development.
+@dataclass(frozen=True)
+class MockScenario:
+    """
+    A named failure scenario that MockProvider can be configured to use.
 
-    Supports canned responses, simulated errors, echo responses, and call tracking
-    while adhering strictly to the Provider protocol.
+    Attributes:
+        error_message: Human-readable description of the simulated failure.
+            Placed verbatim into LLMResult.error; result text is always
+            the empty string for error scenarios.
     """
 
-    def __init__(
-        self,
-        canned_response: str | None = None,
-        canned_responses: list[str] | None = None,
-        canned_error: str | None = None,
-        model: str = "mock-model",
-    ) -> None:
-        """Initialize MockLLM.
+    error_message: str
 
-        Args:
-            canned_response: Static text to return for every call.
-            canned_responses: Sequence of responses to return across sequential calls.
-            canned_error: Simulated error string to return in LLMResult.
-            model: Default model identifier.
-        """
-        self.canned_response = canned_response
-        self.canned_responses = list(canned_responses) if canned_responses else []
-        self.canned_error = canned_error
-        self.model = model
-        self.calls: list[LLMPayload] = []
+    def __post_init__(self) -> None:
+        if not isinstance(self.error_message, str):
+            raise TypeError("error_message must be a str")
+        if not self.error_message.strip():
+            raise ValueError("error_message must not be empty")
+
+
+@dataclass
+class MockProvider(Provider):
+    """
+    Deterministic mock implementation of Provider.
+
+    Args:
+        responses: Optional mapping from a response key to the text returned
+            when that key exactly matches the last user message in the
+            payload.  Falls back to default_response when no key matches.
+        default_response: Text returned when no responses entry matches.
+            Defaults to 'mock response'.
+        scenario: When set, every generate call returns an error result
+            whose error field equals scenario.error_message.
+        latency_seconds: Non-negative seconds to sleep before returning
+            each result.  Defaults to 0.0 (no delay).
+    """
+
+    responses: Mapping[str, str] = field(default_factory=dict)
+    default_response: str = "mock response"
+    scenario: MockScenario | None = None
+    latency_seconds: float = 0.0
+
+    _requests: list[LLMPayload] = field(default_factory=list, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.responses, Mapping):
+            raise TypeError("responses must be a Mapping")
+        for key, value in self.responses.items():
+            if not isinstance(key, str):
+                raise TypeError("responses keys must be str")
+            if not isinstance(value, str):
+                raise TypeError("responses values must be str")
+        if not isinstance(self.default_response, str):
+            raise TypeError("default_response must be a str")
+        if self.scenario is not None and not isinstance(self.scenario, MockScenario):
+            raise TypeError("scenario must be a MockScenario or None")
+        if isinstance(self.latency_seconds, bool) or not isinstance(
+            self.latency_seconds, (int, float)
+        ):
+            raise TypeError("latency_seconds must be a numeric value")
+        if self.latency_seconds < 0:
+            raise ValueError("latency_seconds must be non-negative")
 
     @property
-    def call_count(self) -> int:
-        """Return the number of generate() calls made to this mock."""
-        return len(self.calls)
-
-    @property
-    def last_payload(self) -> LLMPayload | None:
-        """Return the most recent payload received, or None."""
-        return self.calls[-1] if self.calls else None
-
-    def generate(self, payload: LLMPayload) -> LLMResult:
-        """Generate a simulated response without mutating the input payload.
-
-        Args:
-            payload: Validated LLMPayload request.
-
-        Returns:
-            Validated LLMResult.
+    def requests(self) -> list[LLMPayload]:
         """
-        # Record deep copy of payload to preserve call history without mutation
-        self.calls.append(deepcopy(payload))
-
-        if self.canned_error is not None:
-            return LLMResult(text="", usage={}, error=self.canned_error)
-
-        if self.canned_responses:
-            text = self.canned_responses.pop(0)
-        elif self.canned_response is not None:
-            text = self.canned_response
-        else:
-            # Default behavior: echo the last user message
-            user_messages = [
-                m["content"] for m in payload.messages if m["role"] == "user"
-            ]
-            if user_messages:
-                text = f"Mock response to: {user_messages[-1]}"
-            else:
-                text = "Mock response"
-
-        prompt_tokens = sum(
-            max(1, len(m.get("content", "").split())) for m in payload.messages
-        )
-        completion_tokens = max(1, len(text.split()))
-        total_tokens = prompt_tokens + completion_tokens
-
-        usage = {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-        }
-
-        return LLMResult(text=text, usage=usage, error=None)
+        Ordered list of every LLMPayload passed to generate since creation
+        (or since reset was last called).  Each entry is a deep copy so
+        that later mutations by callers do not affect the recorded history.
+        """
+        return list(self._requests)
 
     def reset(self) -> None:
-        """Clear call history."""
-        self.calls.clear()
+        """Clear the recorded request history."""
+        self._requests.clear()
+
+    def generate(self, payload: LLMPayload) -> LLMResult:
+        """
+        Return a deterministic result for payload without mutating it.
+
+        Steps:
+        1. Record a deep copy of payload.
+        2. Sleep for latency_seconds (if non-zero).
+        3. If a scenario is configured, return an error result.
+        4. Otherwise look up the last user message in responses;
+           fall back to default_response if no key matches.
+        5. Compute token counts deterministically from word counts.
+        """
+        self._requests.append(deepcopy(payload))
+        if self.latency_seconds:
+            time.sleep(self.latency_seconds)
+        if self.scenario is not None:
+            return LLMResult(text="", usage={}, error=self.scenario.error_message)
+        last_user_content = _last_user_content(payload)
+        text = self.responses.get(last_user_content, self.default_response)
+        prompt_tokens = sum(len(msg["content"].split()) for msg in payload.messages)
+        completion_tokens = len(text.split())
+        usage: dict[str, Any] = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        }
+        return LLMResult(text=text, usage=usage)
+
+
+def _last_user_content(payload: LLMPayload) -> str:
+    """Return the content of the last user-role message in payload."""
+    for message in reversed(payload.messages):
+        if message["role"] == "user":
+            return message["content"]
+    return ""  # pragma: no cover
