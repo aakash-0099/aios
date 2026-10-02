@@ -14,6 +14,20 @@ from .ipc import (
     IPCMessage,
     IPCTimeoutError,
 )
+from .messages import (
+    MessageType,
+    RequestMessage,
+    ResponseMessage,
+    new_correlation_id,
+)
+from .protocol import (
+    request_from_dict,
+    request_to_dict,
+    response_from_dict,
+    response_to_dict,
+    validate_request,
+    validate_response,
+)
 
 __all__ = [
     "IPCChannel",
@@ -21,4 +35,14 @@ __all__ = [
     "IPCError",
     "IPCMessage",
     "IPCTimeoutError",
+    "MessageType",
+    "RequestMessage",
+    "ResponseMessage",
+    "new_correlation_id",
+    "request_from_dict",
+    "request_to_dict",
+    "response_from_dict",
+    "response_to_dict",
+    "validate_request",
+    "validate_response",
 ]

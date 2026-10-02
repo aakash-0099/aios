@@ -11,6 +11,7 @@ exercise Phase 1/2 domain objects.
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -20,7 +21,48 @@ from aios.communication.ipc import (
     IPCMessage,
     IPCTimeoutError,
 )
-from aios.core.ids import RequestID
+from aios.communication.messages import (
+    MessageType,
+    RequestMessage,
+    ResponseMessage,
+    new_correlation_id,
+)
+from aios.communication.protocol import (
+    request_from_dict,
+    request_to_dict,
+    response_from_dict,
+    response_to_dict,
+    validate_request,
+    validate_response,
+)
+from aios.core.exceptions import ValidationError
+from aios.core.ids import AgentID, RequestID, TaskID
+from aios.core.models import (
+    AgentRequest,
+    AgentResponse,
+    RequestStatus,
+    SystemCall,
+    SystemCallType,
+)
+
+
+def _protocol_request(
+    call_type: SystemCallType = SystemCallType.LLM_CALL,
+    payload: dict | None = None,
+    request_id: RequestID | None = None,
+) -> AgentRequest:
+    if payload is None:
+        payload = {
+            "model": "fake-model",
+            "messages": [{"role": "user", "content": "fake prompt"}],
+            "parameters": {},
+        }
+    return AgentRequest(
+        request_id=request_id or new_correlation_id(),
+        agent_id=AgentID.generate(),
+        task_id=TaskID.generate(),
+        syscall=SystemCall(call_type=call_type, payload=payload),
+    )
 
 
 # ---------------------------------------------------------------
@@ -41,6 +83,81 @@ def test_message_carries_an_arbitrary_fake_payload():
 
     assert message.payload == {"fake": "payload", "n": 1}
     assert message.sender == "agent-fake"
+
+
+# ---------------------------------------------------------------
+# Protocol envelopes and payload validation
+# ---------------------------------------------------------------
+
+
+def test_valid_llm_request_matches_shared_payload_shape():
+    request = _protocol_request()
+
+    validate_request(request)
+    assert MessageType(request.syscall.call_type.value) is MessageType.LLM_CALL
+    assert RequestMessage(request).correlation_id == request.request_id
+
+
+@pytest.mark.parametrize(
+    ("call_type", "payload"),
+    [
+        (
+            SystemCallType.LLM_CALL,
+            {"prompt": "not the LLMPayload contract"},
+        ),
+        (
+            SystemCallType.TOOL_CALL,
+            {"arguments": {"query": "fake query"}},
+        ),
+        (SystemCallType.MEMORY_READ, {}),
+        (
+            SystemCallType.STORAGE_WRITE,
+            {"resource_id": "fake-resource"},
+        ),
+    ],
+)
+def test_malformed_syscall_payloads_are_rejected(call_type, payload):
+    with pytest.raises(ValidationError):
+        validate_request(_protocol_request(call_type, payload))
+
+
+def test_tool_payload_uses_tool_name_and_arguments():
+    request = _protocol_request(
+        SystemCallType.TOOL_CALL,
+        {"tool_name": "fake-tool", "arguments": {"query": "fake"}},
+    )
+
+    validate_request(request)
+
+
+def test_request_and_response_serialization_preserves_correlation_id():
+    correlation_id = new_correlation_id()
+    request = _protocol_request(request_id=correlation_id)
+    request_wire_data = json.loads(json.dumps(request_to_dict(request)))
+    restored_request = request_from_dict(request_wire_data)
+
+    response = AgentResponse(
+        request_id=restored_request.request_id,
+        status=RequestStatus.SUCCESS,
+        result={"answer": "fake response"},
+    )
+    response_wire_data = json.loads(json.dumps(response_to_dict(response)))
+    restored_response = response_from_dict(response_wire_data)
+
+    assert restored_request.request_id == correlation_id
+    assert restored_response.request_id == correlation_id
+    assert ResponseMessage(restored_response).correlation_id == correlation_id
+
+
+def test_response_validation_rejects_non_json_result():
+    response = AgentResponse(
+        request_id=new_correlation_id(),
+        status=RequestStatus.SUCCESS,
+        result=("not", "json-safe"),
+    )
+
+    with pytest.raises(ValidationError):
+        validate_response(response)
 
 
 # ---------------------------------------------------------------
