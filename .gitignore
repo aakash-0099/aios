@@ -6,3 +6,5 @@ __pycache__
 .coverage
 .mypy_cache/
 .pytest_cache/
+.venv*/
+.venv_broken_backup/

@@ -18,6 +18,10 @@ include = ["aios*"]
 testpaths = ["tests", "aios/storage/tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+norecursedirs = [".git", ".venv*", "__pycache__", "*.egg-info", "benchmarks", "evaluation"]
+markers = [
+    "redis: tests requiring a live Redis server (see docs/dev-setup.md)",
+]
 
 
 [tool.ruff]
